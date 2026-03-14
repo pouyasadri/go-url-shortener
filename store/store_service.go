@@ -87,6 +87,20 @@ func RetrieveLongUrl(shortUrl string) (string, error) {
 	return value, nil
 }
 
+// GetRedisClient returns the underlying Redis client for direct access
+func GetRedisClient() *redis.Client {
+	return storeService.redisClient
+}
+
+// HealthCheck verifies that Redis is still connected
+func HealthCheck(ctx context.Context) error {
+	if storeService.redisClient == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	_, err := storeService.redisClient.Ping(ctx).Result()
+	return err
+}
+
 func getEnv(key, defaultVal string) string {
 	if val := os.Getenv(key); val != "" {
 		return val

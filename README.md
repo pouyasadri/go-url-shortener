@@ -8,6 +8,14 @@ The service provides a RESTful API to shorten long URLs and redirect users from 
 
 ## Features
 
+- ✅ **Authentication**: API key-based authentication (Bearer tokens)
+- ✅ **Rate Limiting**: Per-API-key rate limiting (1000 req/day default)
+- ✅ **Admin API**: Generate, list, and revoke API keys
+- ✅ **Request Tracing**: Unique X-Request-ID for each request
+- ✅ **Structured Logging**: JSON-formatted logs with request context
+- ✅ **Panic Recovery**: Automatic recovery from panics with proper error responses
+- ✅ **Health Checks**: Liveness (/health) and readiness (/ready) probes
+- ✅ **RFC 7807 Errors**: Standard problem detail error responses
 - ✅ Fast URL generation using SHA-256 hashing and Base58 encoding
 - ✅ Deterministic short codes (same input always produces same output)
 - ✅ 6-hour TTL on all stored mappings
@@ -15,7 +23,6 @@ The service provides a RESTful API to shorten long URLs and redirect users from 
 - ✅ Comprehensive error handling (no panics in production)
 - ✅ Input validation (URL format checking)
 - ✅ Docker & docker-compose support with multi-stage builds
-- ✅ Health checks included
 - ✅ Makefile with 20+ targets for easy development
 - ✅ Unit tests with 100% pass rate
 - ✅ Multi-platform builds (amd64, arm64)
@@ -26,13 +33,29 @@ The service provides a RESTful API to shorten long URLs and redirect users from 
 go-url-shortener/
 ├── main.go                          # Application entry point
 ├── handler/
-│   └── handlers.go                  # HTTP request handlers
+│   ├── handlers.go                  # HTTP request handlers
+│   ├── admin.go                     # Admin API key management endpoints
+│   └── health.go                    # Health check endpoints
+├── middleware/
+│   ├── request_id.go                # Request ID generation for tracing
+│   ├── logger.go                    # Structured JSON logging
+│   ├── recovery.go                  # Panic recovery middleware
+│   ├── auth.go                      # API key authentication
+│   ├── ratelimit.go                 # Token bucket rate limiting
+│   └── error_handler.go             # RFC 7807 error responses
 ├── shortener/
 │   ├── shorturl_generator.go        # Short URL generation logic
 │   └── shorturl_generator_test.go   # Unit tests
 ├── store/
 │   ├── store_service.go             # Redis storage layer
-│   └── store_service_test.go        # Integration tests
+│   ├── store_service_test.go        # Integration tests
+│   ├── api_keys.go                  # API key management in Redis
+│   └── api_keys_test.go             # API key tests
+├── config/
+│   ├── security.go                  # Security configuration
+│   └── security_test.go             # Configuration tests
+├── models/
+│   └── api_key.go                   # API key data models
 ├── Dockerfile                       # Multi-stage Docker build
 ├── docker-compose.yml               # Docker Compose orchestration
 ├── Makefile                         # Build automation
@@ -110,34 +133,167 @@ The application will be available at `http://localhost:8080`.
 
 All configuration is managed through environment variables in the `.env` file.
 
+### Core Configuration
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SERVER_PORT` | `8080` | HTTP server port |
+| `PORT` | `8080` | HTTP server port |
 | `REDIS_ADDR` | `localhost:6379` | Redis server address (use `redis:6379` in Docker) |
 | `REDIS_PASSWORD` | `` (empty) | Redis authentication password |
 | `REDIS_DB` | `0` | Redis database number (0-15) |
 
+### Security Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REQUIRE_HTTPS` | `false` | Enforce HTTPS for all requests |
+| `RATE_LIMIT_PER_DAY` | `1000` | API requests allowed per key per day |
+| `RATE_LIMIT_WINDOW_HOURS` | `24` | Rate limit reset window in hours |
+| `API_KEY_PREFIX` | `sk_live_` | Prefix for generated API keys |
+| `MAX_URL_LENGTH` | `2048` | Maximum allowed URL length |
+| `ADMIN_API_KEY` | `` (empty) | Admin key for API key management endpoints |
+
 Example `.env`:
 ```env
-SERVER_PORT=8080
+PORT=8080
 REDIS_ADDR=localhost:6379
 REDIS_PASSWORD=
 REDIS_DB=0
+
+REQUIRE_HTTPS=false
+RATE_LIMIT_PER_DAY=1000
+RATE_LIMIT_WINDOW_HOURS=24
+API_KEY_PREFIX=sk_live_
+MAX_URL_LENGTH=2048
+ADMIN_API_KEY=dev_admin_key_12345
 ```
 
 For Docker environments, `.env` variables are automatically passed to the containers via `docker-compose.yml`.
 
 ## API Usage
 
-### Create a Short URL
+### Health Checks
+
+#### Liveness Probe
+**Request:**
+```bash
+curl http://localhost:8080/health
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-14T13:20:00Z"
+}
+```
+
+#### Readiness Probe
+**Request:**
+```bash
+curl http://localhost:8080/ready
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-03-14T13:20:00Z",
+  "uptime": "1h30m45s",
+  "checks": {
+    "redis": {
+      "status": "ok"
+    }
+  }
+}
+```
+
+### Admin API: Generate API Key
+
+Generate a new API key for a user (requires `ADMIN_API_KEY` header).
 
 **Request:**
 ```bash
-curl -X POST http://localhost:8080/create-short-url \
+curl -X POST http://localhost:8080/admin/api-keys/generate \
   -H "Content-Type: application/json" \
+  -H "X-Admin-Key: dev_admin_key_12345" \
   -d '{
-    "long_url": "https://www.example.com/very/long/path?param=value",
-    "user_id": "user-123"
+    "user_id": "user-123",
+    "name": "Production API Key",
+    "environment": "live"
+  }'
+```
+
+**Response (201 Created):**
+```json
+{
+  "id": "key_a1b2c3d4e5f6",
+  "key": "sk_live_abc123xyz...",
+  "user_id": "user-123",
+  "name": "Production API Key",
+  "environment": "live",
+  "created_at": "2026-03-14T13:20:00Z"
+}
+```
+
+**Note**: The `key` is only shown once. Store it securely.
+
+### Admin API: List API Keys
+
+**Request:**
+```bash
+curl -X GET "http://localhost:8080/admin/api-keys?user_id=user-123" \
+  -H "X-Admin-Key: dev_admin_key_12345"
+```
+
+**Response (200 OK):**
+```json
+{
+  "user_id": "user-123",
+  "keys": [
+    {
+      "id": "key_a1b2c3d4e5f6",
+      "user_id": "user-123",
+      "name": "Production API Key",
+      "status": "active",
+      "environment": "live",
+      "created_at": "2026-03-14T13:20:00Z"
+    }
+  ]
+}
+```
+
+### Admin API: Revoke API Key
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/admin/api-keys/revoke \
+  -H "Content-Type: application/json" \
+  -H "X-Admin-Key: dev_admin_key_12345" \
+  -d '{
+    "key_id": "key_a1b2c3d4e5f6"
+  }'
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "API key revoked successfully",
+  "key_id": "key_a1b2c3d4e5f6"
+}
+```
+
+### Create a Short URL
+
+Requires authentication with a valid API key.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8080/api/v1/urls \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk_live_abc123xyz..." \
+  -d '{
+    "long_url": "https://www.example.com/very/long/path?param=value"
   }'
 ```
 
@@ -145,15 +301,28 @@ curl -X POST http://localhost:8080/create-short-url \
 ```json
 {
   "message": "Short URL created successfully",
-  "short_url": "http://localhost:8080/jTa4L57P"
+  "short_url": "http://localhost:8080/jTa4L57P",
+  "user_id": "user-123"
 }
 ```
 
+**Response Headers:**
+```
+X-RateLimit-Limit: 1000
+X-RateLimit-Remaining: 999
+X-RateLimit-Reset: 1710426000
+X-Request-ID: req_a1b2c3d4e5f6
+```
+
 **Error Responses:**
-- `400 Bad Request`: Invalid JSON, missing fields, or malformed URL
-- `500 Internal Server Error`: Redis connection failure
+- `400 Bad Request`: Invalid JSON or malformed URL
+- `401 Unauthorized`: Missing or invalid API key
+- `429 Too Many Requests`: Rate limit exceeded
+- `500 Internal Server Error`: Server error
 
 ### Redirect to Original URL
+
+No authentication required.
 
 **Request:**
 ```bash
@@ -164,17 +333,31 @@ curl -L http://localhost:8080/jTa4L57P
 - `302 Found`: Redirects to the original long URL
 - `404 Not Found`: Short URL not found or expired (TTL expired)
 
-### Health Check
+### Error Responses
 
-**Request:**
-```bash
-curl http://localhost:8080/
-```
+All errors follow the **RFC 7807 Problem Details** format:
 
-**Response (200 OK):**
+**Example 401 Unauthorized:**
 ```json
 {
-  "message": "Welcome to the URL Shortener API"
+  "type": "https://api.url-shortener.dev/errors/invalid_api_key",
+  "title": "Invalid API Key",
+  "status": 401,
+  "detail": "The provided API key is invalid or revoked",
+  "instance": "/api/v1/urls",
+  "trace_id": "req_a1b2c3d4e5f6"
+}
+```
+
+**Example 429 Too Many Requests:**
+```json
+{
+  "type": "https://api.url-shortener.dev/errors/rate_limit_exceeded",
+  "title": "Rate Limit Exceeded",
+  "status": 429,
+  "detail": "Rate limit exceeded. Limit: 1000 requests per day. Reset at: 2026-03-15T13:20:00Z",
+  "instance": "/api/v1/urls",
+  "trace_id": "req_a1b2c3d4e5f6"
 }
 ```
 
@@ -303,7 +486,18 @@ All tests pass with the current codebase.
 
 ## Recent Updates
 
-This project has been thoroughly refactored and modernized:
+### Phase 1: Security & Authentication Foundation (Mar 2026)
+- ✅ **API Key Authentication**: Bearer token-based auth system with Redis storage
+- ✅ **Rate Limiting**: Token bucket algorithm per API key (1000 req/day default)
+- ✅ **Admin API**: Generate, list, and revoke API keys
+- ✅ **Request Tracing**: Unique X-Request-ID for every request
+- ✅ **Structured Logging**: JSON-formatted logs with slog and context propagation
+- ✅ **Panic Recovery**: Automatic recovery middleware with proper error responses
+- ✅ **Health Checks**: Liveness (/health) and readiness (/ready) probes with Redis check
+- ✅ **RFC 7807 Errors**: Standard problem detail error response format
+- ✅ **Middleware Stack**: Request ID → Logger → Recovery → Auth → RateLimit → Handler
+- ✅ **Configuration**: Security settings loaded from environment variables
+- ✅ **Unit Tests**: Config and API key generation tests (no Redis dependency)
 
 ### Code Quality Improvements
 - ✅ Go 1.21.6 → **1.25.0**

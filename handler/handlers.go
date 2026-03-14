@@ -6,37 +6,56 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pouyasadri/go-url-shortener/middleware"
 	"github.com/pouyasadri/go-url-shortener/shortener"
 	"github.com/pouyasadri/go-url-shortener/store"
 )
 
-// URLCreationRequest is the expected JSON body for POST /create-short-url.
+// URLCreationRequest is the expected JSON body for POST /create-short-url or POST /api/v1/urls
 type URLCreationRequest struct {
 	LongURL string `json:"long_url" binding:"required"`
-	UserID  string `json:"user_id"  binding:"required"`
+	Alias   string `json:"alias,omitempty"` // Optional custom alias
 }
 
 func CreateShortURL(c *gin.Context) {
 	var req URLCreationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		middleware.RespondWithError(c, http.StatusBadRequest,
+			"invalid_request",
+			"Invalid request body: "+err.Error())
 		return
 	}
 
-	// Validate that long_url is a well-formed absolute URL.
+	// Get user ID from auth middleware (via API key)
+	userIDVal, exists := c.Get("user_id")
+	if !exists {
+		middleware.RespondWithError(c, http.StatusUnauthorized,
+			"missing_credentials",
+			"User ID not found in context")
+		return
+	}
+	userID := userIDVal.(string)
+
+	// Validate that long_url is a well-formed absolute URL
 	if _, err := url.ParseRequestURI(req.LongURL); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid long_url: must be a valid URL"})
+		middleware.RespondWithError(c, http.StatusBadRequest,
+			"invalid_url",
+			"Invalid URL format")
 		return
 	}
 
-	shortUrl, err := shortener.GenerateShortLink(req.LongURL, req.UserID)
+	shortUrl, err := shortener.GenerateShortLink(req.LongURL, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate short URL"})
+		middleware.RespondWithError(c, http.StatusInternalServerError,
+			"internal_server_error",
+			"Failed to generate short URL")
 		return
 	}
 
-	if err := store.SaveUrlMapping(shortUrl, req.LongURL, req.UserID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save URL mapping"})
+	if err := store.SaveUrlMapping(shortUrl, req.LongURL, userID); err != nil {
+		middleware.RespondWithError(c, http.StatusInternalServerError,
+			"internal_server_error",
+			"Failed to save URL mapping")
 		return
 	}
 
@@ -50,6 +69,7 @@ func CreateShortURL(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{
 		"message":   "Short URL created successfully",
 		"short_url": shortURLFull,
+		"user_id":   userID,
 	})
 }
 
