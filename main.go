@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
 	"log/slog"
 	"os"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pouyasadri/go-url-shortener/config"
+	"github.com/pouyasadri/go-url-shortener/db"
 	"github.com/pouyasadri/go-url-shortener/handler"
 	"github.com/pouyasadri/go-url-shortener/middleware"
 	"github.com/pouyasadri/go-url-shortener/store"
@@ -23,6 +25,26 @@ func main() {
 	// Load security config
 	securityCfg := config.LoadSecurityConfig()
 
+	// Load analytics config
+	analyticsCfg := config.LoadAnalyticsConfig()
+
+	// Initialize MongoDB if analytics is enabled
+	if analyticsCfg.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*1e9) // 30 seconds
+		defer cancel()
+
+		// Test MongoDB connection
+		if _, err := db.GetMongoClient(); err != nil {
+			slog.Error("Failed to connect to MongoDB", slog.String("error", err.Error()))
+			// Don't fail startup, analytics will be skipped
+		} else {
+			// Initialize indexes
+			if err := db.InitializeIndexes(ctx); err != nil {
+				slog.Warn("Failed to initialize MongoDB indexes", slog.String("error", err.Error()))
+			}
+		}
+	}
+
 	r := gin.Default()
 
 	// Global middleware (applied to all routes, in order)
@@ -34,6 +56,11 @@ func main() {
 
 	// 3. Recovery: catches panics and returns proper error responses
 	r.Use(middleware.RecoveryMiddleware())
+
+	// 4. Analytics: captures request metrics (if enabled)
+	if analyticsCfg.Enabled {
+		r.Use(middleware.AnalyticsMiddleware())
+	}
 
 	// Health check endpoints (no auth required)
 	r.GET("/health", handler.HealthCheck)
@@ -57,8 +84,8 @@ func main() {
 
 	// API v1 group (requires authentication)
 	api := r.Group("/api/v1")
-	api.Use(middleware.AuthMiddleware())                 // 4. Auth: validates API key
-	api.Use(middleware.RateLimitMiddleware(securityCfg)) // 5. Rate Limit: per-key rate limiting
+	api.Use(middleware.AuthMiddleware())                 // 5. Auth: validates API key
+	api.Use(middleware.RateLimitMiddleware(securityCfg)) // 6. Rate Limit: per-key rate limiting
 	{
 		api.POST("/urls", handler.CreateShortURL)
 	}
