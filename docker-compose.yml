@@ -15,6 +15,23 @@ services:
     networks:
       - url-shortener-network
 
+  mongo:
+    image: mongo:7-alpine
+    container_name: url-shortener-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: url_shortener
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - url-shortener-network
+
   app:
     build:
       context: .
@@ -35,6 +52,10 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
       
+      # MongoDB configuration
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=url_shortener
+      
       # Security configuration
       - REQUIRE_HTTPS=${REQUIRE_HTTPS:-false}
       - RATE_LIMIT_PER_DAY=${RATE_LIMIT_PER_DAY:-1000}
@@ -45,10 +66,50 @@ services:
       # Admin configuration
       - ADMIN_API_KEY=${ADMIN_API_KEY:-dev_admin_key_12345}
       
+      # Analytics configuration
+      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
+      - METRICS_RETENTION_DAYS=${METRICS_RETENTION_DAYS:-30}
+      - BATCH_WRITE_INTERVAL_MINUTES=${BATCH_WRITE_INTERVAL_MINUTES:-5}
+      - AGGREGATION_INTERVAL_MINUTES=${AGGREGATION_INTERVAL_MINUTES:-60}
+      
       # Gin mode
       - GIN_MODE=${GIN_MODE:-debug}
     depends_on:
       redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    networks:
+      - url-shortener-network
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    container_name: url-shortener-worker
+    environment:
+      # Redis configuration
+      - REDIS_ADDR=redis:6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      
+      # MongoDB configuration
+      - MONGODB_URI=mongodb://mongo:27017
+      - MONGODB_DB=url_shortener
+      
+      # Analytics configuration
+      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
+      - METRICS_RETENTION_DAYS=${METRICS_RETENTION_DAYS:-30}
+      - BATCH_WRITE_INTERVAL_MINUTES=${BATCH_WRITE_INTERVAL_MINUTES:-5}
+      - AGGREGATION_INTERVAL_MINUTES=${AGGREGATION_INTERVAL_MINUTES:-60}
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     networks:
       - url-shortener-network
@@ -56,6 +117,8 @@ services:
 
 volumes:
   redis_data:
+    driver: local
+  mongo_data:
     driver: local
 
 networks:
