@@ -10,7 +10,13 @@ bin/
 *.dylib
 
 # IDE
-.idea/
+.idea/*
+!.idea/
+# keep IntelliJ module files and common shared settings, but ignore workspace-specific files
+!.idea/*.iml
+!.idea/modules.xml
+!.idea/runConfigurations/
+!.idea/codeStyles/
 .vscode/
 *.swp
 *.swo
