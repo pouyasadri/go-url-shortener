@@ -7,6 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/itchyny/base58-go v0.2.2
 	github.com/redis/go-redis/v9 v9.18.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/stretchr/testify v1.11.1
 	go.mongodb.org/mongo-driver v1.14.0
 )
