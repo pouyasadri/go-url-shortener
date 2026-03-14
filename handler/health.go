@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pouyasadri/go-url-shortener/db"
 	"github.com/pouyasadri/go-url-shortener/store"
 )
 
@@ -27,7 +28,7 @@ func HealthCheck(c *gin.Context) {
 	})
 }
 
-// ReadinessCheck is a readiness probe that checks Redis connectivity
+// ReadinessCheck is a readiness probe that checks Redis and MongoDB connectivity
 // GET /ready
 func ReadinessCheck(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -44,6 +45,19 @@ func ReadinessCheck(c *gin.Context) {
 		allHealthy = false
 	} else {
 		checks["redis"] = map[string]string{
+			"status": "ok",
+		}
+	}
+
+	// Check MongoDB
+	if err := db.HealthCheck(ctx); err != nil {
+		checks["mongodb"] = map[string]string{
+			"status": "failed",
+			"error":  err.Error(),
+		}
+		allHealthy = false
+	} else {
+		checks["mongodb"] = map[string]string{
 			"status": "ok",
 		}
 	}
