@@ -26,10 +26,27 @@ services:
     ports:
       - "${SERVER_PORT:-8080}:8080"
     environment:
+      # Server configuration
+      - SERVER_PORT=${SERVER_PORT:-8080}
+      - PORT=${PORT:-8080}
+      
+      # Redis configuration
       - REDIS_ADDR=redis:6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
-      - SERVER_PORT=${SERVER_PORT:-8080}
+      
+      # Security configuration
+      - REQUIRE_HTTPS=${REQUIRE_HTTPS:-false}
+      - RATE_LIMIT_PER_DAY=${RATE_LIMIT_PER_DAY:-1000}
+      - RATE_LIMIT_WINDOW_HOURS=${RATE_LIMIT_WINDOW_HOURS:-24}
+      - API_KEY_PREFIX=${API_KEY_PREFIX:-sk_live_}
+      - MAX_URL_LENGTH=${MAX_URL_LENGTH:-2048}
+      
+      # Admin configuration
+      - ADMIN_API_KEY=${ADMIN_API_KEY:-dev_admin_key_12345}
+      
+      # Gin mode
+      - GIN_MODE=${GIN_MODE:-debug}
     depends_on:
       redis:
         condition: service_healthy
