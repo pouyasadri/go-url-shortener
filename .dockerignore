@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+.github
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Build artifacts
+go.sum~
+*.mod~
+
+# Dev files
+.env
+.env.local
