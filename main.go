@@ -80,6 +80,13 @@ func main() {
 		admin.POST("/api-keys/generate", handler.GenerateAPIKey)
 		admin.GET("/api-keys", handler.ListAPIKeys)
 		admin.POST("/api-keys/revoke", handler.RevokeAPIKey)
+		// Dashboard endpoints
+		admin.GET("/dashboard/overview", handler.DashboardOverview)
+		admin.GET("/dashboard/requests", handler.DashboardRequests)
+		admin.GET("/dashboard/users", handler.DashboardUsers)
+		admin.GET("/dashboard/api-keys", handler.DashboardAPIKeys)
+		admin.GET("/dashboard/errors", handler.DashboardErrors)
+		admin.GET("/dashboard/urls", handler.DashboardURLs)
 	}
 
 	// API v1 group (requires authentication)

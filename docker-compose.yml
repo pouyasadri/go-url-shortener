@@ -16,7 +16,7 @@ services:
       - url-shortener-network
 
   mongo:
-    image: mongo:7-alpine
+    image: mongo:latest
     container_name: url-shortener-mongo
     ports:
       - "27017:27017"

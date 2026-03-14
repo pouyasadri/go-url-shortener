@@ -27,6 +27,49 @@ The service provides a RESTful API to shorten long URLs and redirect users from 
 - ✅ Unit tests with 100% pass rate
 - ✅ Multi-platform builds (amd64, arm64)
 
+## Architecture
+
+### Phase 2: Analytics Pipeline
+
+```
+Client Request
+       ↓
+[Analytics Middleware] ← Captures request metrics (< 1ms overhead)
+       ↓
+[Redis Pub/Sub] → event published to analytics:events channel
+       ↓
+[Event Processor Worker] ← Subscribes to events
+    - Buffers events (1000 items or 5 min timeout)
+    - Batch writes to MongoDB
+       ↓
+[MongoDB Collections]
+    - request_events (30-day TTL)
+    - error_events (30-day TTL)
+    - metrics_hourly (permanent)
+    - user_analytics (permanent)
+    - api_key_analytics (permanent)
+    - url_analytics (permanent)
+       ↓
+[Metrics Aggregator] ← Hourly cron job
+    - Calculates latency percentiles (p50, p95, p99)
+    - Groups metrics by user/API key
+    - Upserts into metrics_hourly
+       ↓
+[Dashboard Endpoints] ← Admin API
+    - Checks Redis cache (60 min TTL)
+    - Falls back to MongoDB if cache miss
+    - Returns JSON with CachedAt timestamp
+```
+
+### Services
+
+- **Main App**: HTTP API server on port 8080
+- **Analytics Worker**: Background service for event processing and aggregation
+- **Redis**: Event streaming and dashboard response caching
+- **MongoDB**: Persistent analytics storage with 30-day raw event retention
+
+All services are orchestrated via `docker-compose.yml` for easy deployment.
+
 ## Project Structure
 
 ```
@@ -35,6 +78,8 @@ go-url-shortener/
 ├── handler/
 │   ├── handlers.go                  # HTTP request handlers
 │   ├── admin.go                     # Admin API key management endpoints
+│   ├── admin_dashboard.go           # Admin dashboard endpoints (6 endpoints)
+│   ├── admin_dashboard_test.go      # Dashboard endpoint tests
 │   └── health.go                    # Health check endpoints
 ├── middleware/
 │   ├── request_id.go                # Request ID generation for tracing
@@ -42,7 +87,9 @@ go-url-shortener/
 │   ├── recovery.go                  # Panic recovery middleware
 │   ├── auth.go                      # API key authentication
 │   ├── ratelimit.go                 # Token bucket rate limiting
-│   └── error_handler.go             # RFC 7807 error responses
+│   ├── error_handler.go             # RFC 7807 error responses
+│   ├── analytics.go                 # Analytics event capture & publishing
+│   └── analytics_test.go            # Analytics middleware tests
 ├── shortener/
 │   ├── shorturl_generator.go        # Short URL generation logic
 │   └── shorturl_generator_test.go   # Unit tests
@@ -53,16 +100,36 @@ go-url-shortener/
 │   └── api_keys_test.go             # API key tests
 ├── config/
 │   ├── security.go                  # Security configuration
-│   └── security_test.go             # Configuration tests
+│   ├── security_test.go             # Configuration tests
+│   └── analytics.go                 # Analytics configuration
 ├── models/
-│   └── api_key.go                   # API key data models
-├── Dockerfile                       # Multi-stage Docker build
+│   ├── api_key.go                   # API key data models
+│   └── analytics.go                 # Analytics data models
+├── db/
+│   ├── mongo.go                     # MongoDB client (singleton)
+│   └── indexes.go                   # MongoDB index definitions
+├── analytics/
+│   └── repository.go                # MongoDB data access layer
+├── cache/
+│   └── redis_cache.go               # Redis caching abstraction
+├── cmd/analytics-worker/
+│   ├── main.go                      # Worker service entry point
+│   ├── event_processor.go           # Event buffering & batch writes
+│   ├── metrics_aggregator.go        # Hourly metrics calculation
+│   └── cleanup_job.go               # Data retention cleanup
+├── docs/
+│   ├── ANALYTICS_API.md             # Analytics API documentation
+│   ├── MONGODB_SETUP.md             # MongoDB setup and configuration
+│   └── METRICS_SCHEMA.md            # Data model and schema reference
+├── Dockerfile                       # Multi-stage Docker build (main app)
+├── Dockerfile.worker                # Multi-stage Docker build (worker)
 ├── docker-compose.yml               # Docker Compose orchestration
 ├── Makefile                         # Build automation
 ├── .env.example                     # Environment variables template
 ├── .env                             # Local environment (git ignored)
 └── README.md                        # This file
 ```
+
 
 ## Prerequisites
 
@@ -485,6 +552,28 @@ make test-short
 All tests pass with the current codebase.
 
 ## Recent Updates
+
+### Phase 2: Analytics & Observability (Mar 2026)
+- ✅ **MongoDB Integration**: Production-ready MongoDB connection with pooling (10-100 connections)
+- ✅ **Analytics Middleware**: Captures all request metrics with Redis pub/sub (< 1ms overhead)
+- ✅ **Event Streaming**: Asynchronous event publishing to Redis channels
+- ✅ **Background Worker**: Separate service for event processing and metrics aggregation
+- ✅ **Event Processor**: Buffers events (1000 items or 5 min timeout) and batch writes to MongoDB
+- ✅ **Metrics Aggregator**: Hourly cron job for percentile calculation and metric aggregation
+- ✅ **Data Retention**: 30-day TTL on raw events with automatic cleanup
+- ✅ **Indexed Storage**: Optimized MongoDB indexes for common query patterns
+- ✅ **6 Admin Dashboard Endpoints**:
+  - `GET /admin/dashboard/overview` - System snapshot with key metrics
+  - `GET /admin/dashboard/requests` - Time-series metrics with latency percentiles
+  - `GET /admin/dashboard/users` - User engagement statistics (sortable, paginated)
+  - `GET /admin/dashboard/api-keys` - API key usage analytics
+  - `GET /admin/dashboard/errors` - Error log viewer with filtering
+  - `GET /admin/dashboard/urls` - URL redirect tracking and engagement
+- ✅ **Redis Caching**: Dashboard responses cached for 60 minutes
+- ✅ **Graceful Degradation**: Analytics optional; app works without MongoDB/Redis
+- ✅ **Comprehensive Documentation**: Analytics API, MongoDB setup, metrics schema guides
+- ✅ **Docker Multi-Service**: Analytics worker runs as separate container
+- ✅ **All Tests Passing**: 20+ tests covering analytics, middleware, config, and core logic
 
 ### Phase 1: Security & Authentication Foundation (Mar 2026)
 - ✅ **API Key Authentication**: Bearer token-based auth system with Redis storage
