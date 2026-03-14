@@ -41,20 +41,32 @@ deps: ## Download and tidy dependencies
 
 # Docker targets
 docker-build: ## Build Docker image using docker buildx
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		-t $(DOCKER_IMAGE) \
-		-f Dockerfile \
-		--load \
-		.
+	@# Use buildx (multi-platform) when available; otherwise fall back to docker build (single-platform)
+	@if docker buildx version >/dev/null 2>&1; then \
+		docker buildx build \
+			--platform $(PLATFORMS) \
+			-t $(DOCKER_IMAGE) \
+			-f Dockerfile \
+			--load \
+			.; \
+	else \
+		echo "docker buildx not available, falling back to 'docker build' (single-arch)"; \
+		docker build -t $(DOCKER_IMAGE) -f Dockerfile .; \
+	fi
 
 docker-build-push: ## Build and push Docker image to registry (requires credentials)
-	docker buildx build \
-		--platform $(PLATFORMS) \
-		-t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE) \
-		-f Dockerfile \
-		--push \
-		.
+	@# Use buildx (multi-platform push) when available; otherwise fall back to docker build + docker push
+	@if docker buildx version >/dev/null 2>&1; then \
+		docker buildx build \
+			--platform $(PLATFORMS) \
+			-t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE) \
+			-f Dockerfile \
+			--push \
+			.; \
+	else \
+		echo "docker buildx not available, falling back to 'docker build' + 'docker push' (single-arch)"; \
+		docker build -t $(DOCKER_REGISTRY)/$(DOCKER_IMAGE) -f Dockerfile . && docker push $(DOCKER_REGISTRY)/$(DOCKER_IMAGE); \
+	fi
 
 docker-up: ## Start Docker Compose stack
 	docker-compose up -d
